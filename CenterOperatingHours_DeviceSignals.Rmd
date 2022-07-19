@@ -1,0 +1,276 @@
+---
+title: "Center Operating Hours"
+subtitle: "Using Mobile Device Signals to Understand Shopper Density"
+author: "Insights and Analytics | `r paste0('Last Updated: ', format(Sys.time(), '%d %B, %Y'))`"
+output: 
+  pagedreport::paged_windmill:
+    front_img: "input/ottawa.jpg"
+    logo: "input/TangerOutlets_LOGO_horizontal.svg"
+    img_to_dark: TRUE
+    logo_to_white: TRUE
+    toc: TRUE
+knit: pagedown::chrome_print
+toc-title: "Table of Contents"
+main-color: "#bf0000"
+secondary-color: "#acacad"
+google-font: TRUE
+main-font: "Roboto"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css, echo = FALSE}
+
+p, ul, ol {
+  margin-right: 0%;
+}
+
+h1.title {
+    font-size: 30pt;
+    margin-right: 10%;
+    font-weight: 700;
+}
+
+h1.subtitle {
+    font-size: 20pt;
+    margin-right: 15%;
+    font-weight: 300;
+}
+
+h2.author {
+    font-size: 12pt;
+    margin-right: 10%;
+    font-weight: 700;
+}
+
+h2.date {
+    font-size: 12pt;
+    margin-right: 10%;
+    font-weight: 300;
+}
+
+h1.toc-title {
+    font-size: 30pt;
+    font-weight: 200;
+}
+
+h1 { /* Header 1 */
+  font-size: 26px;
+}
+h2 { /* Header 2 */
+    font-size: 20px;
+}
+h3 { /* Header 3 */
+  font-size: 16px;
+}
+body {
+  font-size: 10pt;
+}
+```
+
+```{r setup, include=FALSE}
+# knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(fig.align = 'center', fig.height = 9)
+library(tidyverse)
+# library(kableExtra)
+# library(gt)
+options(scipen = 999)
+theme_set(theme_bw())
+cb_palette <- c("#003399", "#ff2b4f", "#3686d3", "#fcab27", "#88298a", "#000000", "#969696", "#008f05", "#FF5733", "#E5F828")
+
+load(file = here::here("data", "bab_all.rds"))
+# load(file = here::here("data", "trafficClean.rds"))
+
+
+removeDates <- as.Date(c("2021-11-26", "2020-11-27", "2019-11-29","2019-11-28"))
+
+dat <- 
+  bab_all %>% 
+  mutate(loc = str_remove_all(location_name, "Tanger Outlets ")) %>% 
+  # filter(loc == "Blowing Rock") %>% 
+  filter(!SignalDate %in% removeDates) %>% 
+  mutate(DOW = lubridate::wday(SignalDate, abbr = T, label = T),
+         DOW = factor(DOW, levels = c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), order = T),
+         TraffMon = lubridate::month(SignalDate, label = T, abbr = T),
+         TraffSeason = case_when(TraffMon %in% c("Jan", "Feb", "Mar") ~  "Winter Period",
+                                 TraffMon %in% c("Nov", "Dec") ~  "Holiday Period",
+                                 TRUE ~ "Summer Period"),
+         TraffYear = lubridate::year(SignalDate)) %>% 
+  group_by(DOW, loc, hour, TraffYear,TraffSeason) %>% 
+  summarise(TotalD = sum(TotalDevices)) %>% 
+  ungroup() %>% 
+  group_by(loc, DOW, TraffYear,TraffSeason) %>% 
+  mutate(PerDay = TotalD/sum(TotalD)) %>% 
+  ungroup() %>% 
+  mutate(PerDay = as.numeric(PerDay),
+         TraffSeason = factor(TraffSeason, labels = c("Summer Period", "Winter Period","Holiday Period")),
+         AMPM = hms::hms(hours = hour)
+         # AMPM = lubridate::parse_date_time(hour, "%H")#format(lubridate::parse_date_time(hour, "%H"), "%I %p")#,
+         # AMPM = factor(AMPM, labels = c(
+         #   "12 AM", "01 AM", "02 AM", "03 AM", "04 AM", "05 AM",
+         #   "06 AM", "07 AM", "08 AM", "09 AM", "10 AM", "11 AM",
+         #   "12 PM", "01 PM", "02 PM", "03 PM", "04 PM", "05 PM",
+         #   "06 PM", "07 PM", "08 PM", "09 PM", "10 PM", "11 PM"))
+         )
+
+
+# unique(dat$AMPM)
+
+#---- data cleaning --------
+
+UnqCenters <-
+  dat %>% 
+  distinct(loc) %>% 
+  pull(loc)
+
+
+i <- UnqCenters[1]
+i2 <- str_remove_all(i, pattern = " Outlet Center")
+# CenterFilt <- "Blowing Rock Outlet Center"
+```
+
+
+
+```{r, include=F}
+library(cowplot)
+library(scales)
+library(hms)
+
+rmString = " Outlet Center| Outlets"
+
+bildChart <- function(i){
+
+p_max <- 
+  dat %>%
+  filter(hour >6,
+         hour <= 22) %>% 
+  filter(loc %in% i) %>% 
+  group_by(DOW, TraffYear, TraffSeason, loc) %>% 
+  filter(PerDay == max(PerDay)) %>% 
+  ungroup() %>% 
+  group_by(DOW, TraffYear, TraffSeason, loc) %>%  
+  filter(hour == min(hour)) %>% 
+  ungroup() %>% 
+  arrange(TraffYear, TraffSeason, DOW) %>% 
+  ungroup()
+
+  
+pdat <- 
+  dat %>%
+  filter(hour >6,
+         hour <= 22) %>% 
+  filter(loc %in% i)
+
+p <- ggplot()+
+  geom_tile(data = pdat, 
+            aes(DOW, AMPM, fill=PerDay), 
+            color = "white")+
+  geom_text(data = pdat,
+            aes(DOW, AMPM,label = scales::percent(PerDay, accuracy = .1)), 
+            size = 2)+
+  geom_tile(data = p_max, 
+            aes(DOW, AMPM), 
+            color = "black", alpha = 0.1)+
+  scale_fill_gradient(low="grey90", high=cb_palette[c(3)], labels = scales::percent) +  
+  # scale_y_continuous(expand=c(0,0), breaks = seq(6,22,1))+
+  scale_y_time(expand=c(0,0),
+               labels = label_time(format = '%I %p'),
+               breaks = hms(hours = 6:22))+
+  scale_x_discrete(expand=c(0,0))+
+  labs(title = glue::glue("Average Mobile Signals for: {str_remove_all(i, pattern = rmString)}"),
+       subtitle = "For the percent of signals first seen in that hour",
+       y = NULL, #"Hour of Day", 
+       x = NULL,
+       fill = "% First Signal Seen")+
+  theme(axis.text.x = element_text(size = 8),
+        legend.position = "none")+
+  # facet_wrap(TraffYear ~., ncol =1)
+  facet_grid(TraffYear ~ TraffSeason)
+
+# 
+# # print(t)  
+# t %>%  gtsave("t11.png", path = here::here("img"))
+# 
+# t1 <- ggdraw() + draw_image(here::here("img","t11.png"), scale = 1)
+# p1 <- ggdraw(p)
+# 
+#   
+print(plot_grid(p, #NULL, 
+                ncol = 1, rel_widths = c(1, 1), rel_heights = c(4,1)))
+
+# print(p)
+  
+}
+
+bildChart(i)
+
+
+```
+
+# Purpose and Overview {-}
+
+Analyze center level traffic patterns by hour, day and season to inform operating hours and staffing deployment across various disciplines including Security, Janitorial and Shopper Services. 
+
+
+## Data Source {-}
+This report is built from the mobile signal data as provided by the Alexander Babbage team. The data has been aggregated to give count of signals by hour, by center, and by day. The hour the device was first seen is where that device is counted. 
+
+This data does not give the user a view around dwell time. 
+
+## Methodology {-}
+
+The report uses three full years of mobile signals from 2019 to through 2021, with the focus on providing an aggregated view by center. The summarized count of devices by DOW, year, and period (period definition below), was then used to calculate the percent of signals by day that were first seen at that hour.
+
+
+The following months have been determined to fall within the periods listed below:  
+
+* <u>Summer Period:</u> Apr, May, Jun, Jul, Aug, Sep, Oct  
+* <u>Winter Period:</u> Jan, Feb, Mar  
+* <u>Holiday Period:</u> Nov, Dec 
+
+
+__Exclusions/Inclusions__  
+
+* Canadian centers have been excluded from this data
+* Thanksgiving and Black Friday were removed from the data as they are significant outliers in the mobile signal data.
+
+
+
+## Refresh Information {-}
+
+This report was last generated on __`r format(Sys.time(), '%d %B, %Y')`.__
+
+Using data for the following time frame: __CY 2019 - 2021__
+
+Code is available upon request and saved within the Enterprise Insights and Analytics code repo.  
+
+* Developer: Phil Walker
+
+
+
+\newpage
+
+# By Center View {-}
+
+```{r center_loops, results='asis'}
+
+
+
+for(i in UnqCenters) {
+  cat("\n")
+  cat(paste0("## ", i, "{-} \n"))
+
+    bildChart(i)
+
+  cat("\n\n")
+}
+
+
+```
+
+
+
+
+
+
